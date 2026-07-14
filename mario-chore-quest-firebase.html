@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chore Quest</title>
+
+<!-- Firebase (free Spark plan is plenty for this app) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Baloo+2:wght@500;700;800&display=swap');
+
+:root{
+  --sky: #6EC6FF;
+  --sky-deep: #4AA8E8;
+  --brick: #C9472B;
+  --brick-dark: #A8371F;
+  --gold: #FFD23F;
+  --gold-dark: #E8AC00;
+  --pipe: #17A54F;
+  --pipe-dark: #0E7F3B;
+  --ink: #1B2340;
+  --cream: #FFF8E7;
+  --cream-dark: #FFEFC7;
+  --danger: #E8453C;
+  --white: #ffffff;
+  --radius: 14px;
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+
+body{
+  font-family:'Baloo 2', sans-serif;
+  background:
+    linear-gradient(180deg, var(--sky) 0%, var(--sky) 65%, var(--sky-deep) 100%);
+  min-height:100vh;
+  color:var(--ink);
+  padding-bottom:60px;
+  position:relative;
+  overflow-x:hidden;
+}
+
+/* ambient clouds */
+.cloud{
+  position:absolute;
+  background:var(--white);
+  border-radius:50%;
+  opacity:0.85;
+  filter: drop-shadow(0 4px 0 rgba(0,0,0,0.05));
+}
+.cloud::before, .cloud::after{
+  content:'';
+  position:absolute;
+  background:var(--white);
+  border-radius:50%;
+}
+
+.pixel{ font-family:'Press Start 2P', monospace; }
+
+/* ---------- HUD HEADER ---------- */
+.hud{
+  position:sticky; top:0; z-index:50;
+  background:var(--brick);
+  border-bottom:6px solid var(--brick-dark);
+  padding:10px 16px;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  box-shadow:0 4px 0 rgba(0,0,0,0.15);
+}
+.hud-title{
+  color:var(--white);
+  font-size:14px;
+  text-shadow:2px 2px 0 var(--brick-dark);
+  display:flex; align-items:center; gap:10px;
+  white-space:nowrap;
+}
+.hud-title .block{
+  width:28px; height:28px;
+  background:var(--gold);
+  border:3px solid var(--ink);
+  border-radius:4px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;
+  animation: blockFloat 2.2s ease-in-out infinite;
+}
+@keyframes blockFloat{
+  0%,100%{ transform:translateY(0);}
+  50%{ transform:translateY(-3px);}
+}
+.coin-count{
+  background:var(--ink);
+  color:var(--gold);
+  padding:8px 14px;
+  border-radius:20px;
+  font-size:13px;
+  display:flex; align-items:center; gap:8px;
+  border:3px solid var(--gold-dark);
+  white-space:nowrap;
+}
+.coin-count .coin{
+  width:18px;height:18px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, #FFF3B0, var(--gold) 60%, var(--gold-dark));
+  display:inline-block;
+  border:2px solid var(--gold-dark);
+}
+
+/* ---------- MODE SWITCH ---------- */
+.mode-switch{
+  display:flex; justify-content:center; gap:14px;
+  padding:22px 16px 6px;
+}
+.pipe-btn{
+  font-family:'Press Start 2P', monospace;
+  font-size:11px;
+  color:var(--white);
+  background:var(--pipe);
+  border:0;
+  border-top:6px solid #33C46F;
+  border-bottom:6px solid var(--pipe-dark);
+  border-left:4px solid var(--pipe-dark);
+  border-right:4px solid var(--pipe-dark);
+  border-radius:10px;
+  padding:16px 20px;
+  cursor:pointer;
+  text-shadow:1px 1px 0 rgba(0,0,0,0.25);
+  transition: transform .08s ease;
+  flex:1;
+  max-width:220px;
+}
+.pipe-btn:active{ transform: translateY(3px); border-bottom-width:3px;}
+.pipe-btn.inactive{
+  background:#8FA3AE;
+  border-top-color:#A9BAC2;
+  border-bottom-color:#5F707A;
+  border-left-color:#5F707A;
+  border-right-color:#5F707A;
+  opacity:0.85;
+}
+
+/* ---------- LAYOUT ---------- */
+.wrap{
+  max-width:760px;
+  margin:0 auto;
+  padding:18px 16px 40px;
+}
+
+.panel{
+  background:var(--cream);
+  border:4px solid var(--ink);
+  border-radius:var(--radius);
+  padding:20px;
+  margin-bottom:20px;
+  box-shadow:0 6px 0 rgba(0,0,0,0.15);
+}
+
+.panel h2{
+  font-family:'Press Start 2P', monospace;
+  font-size:14px;
+  margin:0 0 16px;
+  color:var(--brick);
+  display:flex; align-items:center; gap:10px;
+}
+
+.empty-msg{
+  font-size:15px;
+  opacity:0.7;
+  padding:18px 6px;
+  text-align:center;
+}
+
+/* ---------- CHORE CARD ---------- */
+.chore-list{ display:flex; flex-direction:column; gap:12px; }
+.chore-card{
+  background:var(--white);
+  border:3px solid var(--ink);
+  border-radius:12px;
+  padding:14px 16px;
+  display:flex; align-items:center; gap:14px;
+  position:relative;
+}
+.chore-icon{
+  width:44px;height:44px;
+  background:var(--gold);
+  border:3px solid var(--ink);
+  border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;
+  flex-shrink:0;
+}
+.chore-body{ flex:1; min-width:0; }
+.chore-name{ font-weight:800; font-size:17px; }
+.chore-points{ font-size:13px; color:var(--gold-dark); font-weight:700;}
+.chore-status{
+  font-size:11px;
+  font-weight:700;
+  padding:4px 10px;
+  border-radius:20px;
+  white-space:nowrap;
+}
+.status-none{ background:#eee; color:#777; }
+.status-pending{ background:#FFE9A8; color:#8A6300; }
+.status-done{ background:#CFF5D8; color:var(--pipe-dark); }
+
+.action-btn{
+  font-family:'Baloo 2', sans-serif;
+  font-weight:800;
+  font-size:14px;
+  border-radius:10px;
+  padding:10px 16px;
+  border:3px solid var(--ink);
+  cursor:pointer;
+  white-space:nowrap;
+  transition: transform .08s ease;
+}
+.action-btn:active{ transform:scale(0.95); }
+.btn-do{ background:var(--pipe); color:var(--white); }
+.btn-approve{ background:var(--pipe); color:var(--white); }
+.btn-deny{ background:var(--danger); color:var(--white); }
+.btn-secondary{ background:var(--white); color:var(--ink); }
+.btn-gold{ background:var(--gold); color:var(--ink); }
+.btn-danger-outline{ background:var(--white); color:var(--danger); border-color:var(--danger); }
+
+/* ---------- REWARDS ---------- */
+.reward-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(150px,1fr));
+  gap:12px;
+}
+.reward-card{
+  background:var(--white);
+  border:3px solid var(--ink);
+  border-radius:12px;
+  padding:14px;
+  text-align:center;
+}
+.reward-icon{ font-size:30px; margin-bottom:6px;}
+.reward-name{ font-weight:800; font-size:14px; margin-bottom:4px;}
+.reward-cost{
+  font-size:12px; color:var(--gold-dark); font-weight:700; margin-bottom:10px;
+  display:flex; align-items:center; justify-content:center; gap:5px;
+}
+.reward-cost .coin{ width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 35% 30%, #FFF3B0, var(--gold) 60%, var(--gold-dark)); border:1.5px solid var(--gold-dark); display:inline-block;}
+
+/* ---------- PIN GATE ---------- */
+.pin-gate{
+  max-width:320px; margin:40px auto; text-align:center;
+}
+.pin-display{
+  font-family:'Press Start 2P', monospace;
+  font-size:22px;
+  letter-spacing:10px;
+  background:var(--ink);
+  color:var(--gold);
+  border-radius:10px;
+  padding:16px;
+  margin:16px 0;
+  min-height:24px;
+}
+.pin-pad{
+  display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
+}
+.pin-key{
+  font-family:'Press Start 2P', monospace;
+  font-size:16px;
+  padding:16px 0;
+  border-radius:10px;
+  border:3px solid var(--ink);
+  background:var(--white);
+  cursor:pointer;
+}
+.pin-key:active{ background:var(--cream-dark); }
+.pin-error{ color:var(--danger); font-weight:700; min-height:20px; margin-top:8px; }
+
+/* ---------- FORMS ---------- */
+.form-row{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+.form-row input, .form-row select{
+  font-family:'Baloo 2', sans-serif;
+  font-size:15px;
+  padding:10px 12px;
+  border:3px solid var(--ink);
+  border-radius:8px;
+  flex:1;
+  min-width:100px;
+}
+.form-row input[type="number"]{ max-width:110px; }
+
+.manage-item{
+  display:flex; align-items:center; gap:10px;
+  background:var(--white);
+  border:2px solid var(--ink);
+  border-radius:10px;
+  padding:8px 12px;
+  margin-bottom:8px;
+}
+.manage-item .mi-icon{ font-size:20px; }
+.manage-item .mi-name{ font-weight:800; flex:1; }
+.manage-item .mi-meta{ font-size:12px; color:var(--gold-dark); font-weight:700; }
+.mi-del{
+  background:none; border:none; color:var(--danger); font-size:20px; cursor:pointer; padding:2px 8px;
+}
+
+.subtle-btn{
+  background:none;
+  border:2px dashed var(--ink);
+  border-radius:8px;
+  padding:6px 10px;
+  font-size:12px;
+  cursor:pointer;
+  color:var(--ink);
+  font-weight:700;
+}
+
+.toast{
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  background:var(--ink); color:var(--gold);
+  font-family:'Press Start 2P', monospace;
+  font-size:11px;
+  padding:12px 18px;
+  border-radius:10px;
+  z-index:100;
+  opacity:0;
+  pointer-events:none;
+  transition: opacity .25s ease, transform .25s ease;
+  text-align:center;
+  max-width:80vw;
+}
+.toast.show{ opacity:1; transform:translateX(-50%) translateY(-6px); }
+
+.tag-pending-count{
+  background:var(--danger);
+  color:white;
+  font-size:11px;
+  border-radius:20px;
+  padding:2px 8px;
+  margin-left:6px;
+}
+
+.settings-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; flex-wrap:wrap;}
+
+@media (max-width:480px){
+  .hud-title{ font-size:11px; }
+  .panel h2{ font-size:12px; }
+  .chore-card{ flex-wrap:wrap; }
+}
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <div class="hud-title"><span class="block pixel">?</span> CHORE QUEST</div>
+  <div class="coin-count"><span class="coin"></span><span id="hudPoints">0</span> pts</div>
+</div>
+
+<div class="mode-switch">
+  <button class="pipe-btn" id="btnKidMode" onclick="setMode('kid')">🍄 KID</button>
+  <button class="pipe-btn inactive" id="btnCareMode" onclick="setMode('caregiver')">🔧 CAREGIVER</button>
+</div>
+
+<div class="wrap" id="app"></div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ====== FIREBASE SETUP — PASTE YOUR CONFIG HERE ======
+// Get this from: Firebase Console > Project Settings > General > Your apps > SDK setup and config
+const firebaseConfig = {
+  apiKey: "AIzaSyD2GU80XYasVYBFGMT8ygeeiW4RVT2aIYE",
+  authDomain: "chore-quest---mario-cart-theme.firebaseapp.com",
+  projectId: "chore-quest---mario-cart-theme",
+  storageBucket: "chore-quest---mario-cart-theme.firebasestorage.app",
+  messagingSenderId: "401088686771",
+  appId: "1:401088686771:web:2c2e250496b5c481091ec6"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+// Everyone using this page reads/writes the same single document,
+// which is what makes the kid and caregiver views stay in sync.
+const stateDocRef = db.collection('choreQuest').doc('state');
+// ====== END FIREBASE SETUP ======
+
+let state = null;
+let mode = 'kid';
+let pinBuffer = '';
+let careAuthed = false;
+let firstSnapshot = true;
+
+const DEFAULT_CHORES = [
+  {id:'c1', name:'Brush Teeth (Morning)', icon:'🦷', points:5},
+  {id:'c2', name:'Brush Teeth (Night)', icon:'🦷', points:5},
+  {id:'c3', name:'Make Bed', icon:'🛏️', points:5},
+  {id:'c4', name:'Homework', icon:'📚', points:10},
+  {id:'c5', name:'Clean Room', icon:'🧹', points:10},
+  {id:'c6', name:'Feed Pet', icon:'🐢', points:5},
+];
+const DEFAULT_REWARDS = [
+  {id:'r1', name:'30 min Screen Time', icon:'🎮', cost:20},
+  {id:'r2', name:'Pick Dinner', icon:'🍕', cost:30},
+  {id:'r3', name:'Stay Up 15 Extra Min', icon:'🌙', cost:25},
+  {id:'r4', name:'Small Toy', icon:'⭐', cost:100},
+];
+
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+function defaultState(){
+  return {
+    pin: '1234',
+    points: 0,
+    date: todayStr(),
+    chores: DEFAULT_CHORES.slice(),
+    rewards: DEFAULT_REWARDS.slice(),
+    status: {},
+    redemptions: [],
+    log: []
+  };
+}
+
+function loadState(){
+  // Realtime listener: any change anyone makes (kid or caregiver, any device)
+  // pushes here automatically, so we don't need to manually refresh.
+  stateDocRef.onSnapshot(snap => {
+    if(snap.exists){
+      state = snap.data();
+      const changed = rolloverDayIfNeeded();
+      render();
+      if(changed) persist();
+    } else if(firstSnapshot){
+      firstSnapshot = false;
+      state = defaultState();
+      persist();
+    }
+  }, err => {
+    console.error('firestore listen failed', err);
+    showToast("CONNECTION ERROR - CHECK SETUP");
+  });
+}
+
+async function persist(){
+  try{
+    await stateDocRef.set(state);
+  } catch(e){
+    console.error('storage failed', e);
+    showToast("COULDN'T SAVE - TRY AGAIN");
+  }
+}
+
+function rolloverDayIfNeeded(){
+  const t = todayStr();
+  if(state.date !== t){
+    state.date = t;
+    state.status = {};
+    return true;
+  }
+  return false;
+}
+
+function uid(prefix){
+  return prefix + Math.random().toString(36).slice(2,9);
+}
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(()=> t.classList.remove('show'), 2200);
+}
+
+function setMode(m){
+  mode = m;
+  document.getElementById('btnKidMode').classList.toggle('inactive', mode!=='kid');
+  document.getElementById('btnCareMode').classList.toggle('inactive', mode!=='caregiver');
+  if(mode === 'kid') careAuthed = false;
+  render();
+}
+
+/* ---------------- RENDER ---------------- */
+function render(){
+  document.getElementById('hudPoints').textContent = state.points;
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if(mode === 'kid'){
+    app.appendChild(renderKidView());
+  } else {
+    if(!careAuthed){
+      app.appendChild(renderPinGate());
+    } else {
+      app.appendChild(renderCaregiverView());
+    }
+  }
+}
+
+function el(html){
+  const d = document.createElement('div');
+  d.innerHTML = html.trim();
+  return d.firstElementChild;
+}
+
+function renderKidView(){
+  const wrap = document.createElement('div');
+
+  // Chores panel
+  const choresHtml = state.chores.map(c=>{
+    const st = state.status[c.id] || 'none';
+    let statusEl, actionEl;
+    if(st === 'none'){
+      statusEl = `<span class="chore-status status-none">Not done</span>`;
+      actionEl = `<button class="action-btn btn-do" onclick="markDone('${c.id}')">I did it!</button>`;
+    } else if(st === 'pending'){
+      statusEl = `<span class="chore-status status-pending">Waiting for check</span>`;
+      actionEl = `<button class="action-btn btn-secondary" onclick="undoPending('${c.id}')">Undo</button>`;
+    } else {
+      statusEl = `<span class="chore-status status-done">Confirmed! +${c.points}</span>`;
+      actionEl = '';
+    }
+    return `
+      <div class="chore-card">
+        <div class="chore-icon">${c.icon}</div>
+        <div class="chore-body">
+          <div class="chore-name">${escapeHtml(c.name)}</div>
+          <div class="chore-points">${c.points} pts</div>
+        </div>
+        ${statusEl}
+        ${actionEl}
+      </div>`;
+  }).join('');
+
+  const rewardsHtml = state.rewards.map(r=>{
+    const canAfford = state.points >= r.cost;
+    const pendingReq = state.redemptions.find(x=>x.rewardId===r.id && x.status==='pending');
+    let btn;
+    if(pendingReq){
+      btn = `<button class="action-btn btn-secondary" disabled>Requested...</button>`;
+    } else {
+      btn = `<button class="action-btn ${canAfford?'btn-gold':'btn-secondary'}" ${canAfford?'':'disabled'} onclick="requestRedeem('${r.id}')">${canAfford?'Redeem':'Not enough'}</button>`;
+    }
+    return `
+      <div class="reward-card">
+        <div class="reward-icon">${r.icon}</div>
+        <div class="reward-name">${escapeHtml(r.name)}</div>
+        <div class="reward-cost"><span class="coin"></span>${r.cost}</div>
+        ${btn}
+      </div>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="panel">
+      <h2>⭐ TODAY'S QUESTS</h2>
+      <div class="chore-list">${choresHtml || '<div class="empty-msg">No chores yet. Ask a caregiver to add some!</div>'}</div>
+    </div>
+    <div class="panel">
+      <h2>🏆 REWARD SHOP</h2>
+      <div class="reward-grid">${rewardsHtml || '<div class="empty-msg">No rewards yet.</div>'}</div>
+    </div>
+  `;
+  return wrap;
+}
+
+function renderPinGate(){
+  const wrap = document.createElement('div');
+  const digits = ['1','2','3','4','5','6','7','8','9','⌫','0','OK'];
+  wrap.innerHTML = `
+    <div class="panel pin-gate">
+      <h2 style="justify-content:center;">🔒 CAREGIVER PIN</h2>
+      <div class="pin-display" id="pinDisplay"></div>
+      <div class="pin-pad">
+        ${digits.map(d=>`<button class="pin-key" onclick="pinPress('${d}')">${d}</button>`).join('')}
+      </div>
+      <div class="pin-error" id="pinError"></div>
+      <div style="margin-top:14px; font-size:12px; opacity:0.7;">Default PIN is 1234 unless changed in Settings.</div>
+    </div>
+  `;
+  return wrap;
+}
+
+function pinPress(d){
+  const err = document.getElementById('pinError');
+  err.textContent = '';
+  if(d === '⌫'){ pinBuffer = pinBuffer.slice(0,-1); }
+  else if(d === 'OK'){
+    if(pinBuffer === state.pin){
+      careAuthed = true;
+      pinBuffer = '';
+      render();
+      return;
+    } else {
+      err.textContent = 'WRONG PIN';
+      pinBuffer = '';
+    }
+  } else if(pinBuffer.length < 8){
+    pinBuffer += d;
+  }
+  document.getElementById('pinDisplay').textContent = '•'.repeat(pinBuffer.length);
+}
+
+function renderCaregiverView(){
+  const wrap = document.createElement('div');
+
+  const pendingChores = state.chores.filter(c => state.status[c.id] === 'pending');
+  const pendingRedemptions = state.redemptions.filter(r=>r.status==='pending');
+
+  const pendingChoresHtml = pendingChores.map(c=>`
+    <div class="chore-card">
+      <div class="chore-icon">${c.icon}</div>
+      <div class="chore-body">
+        <div class="chore-name">${escapeHtml(c.name)}</div>
+        <div class="chore-points">${c.points} pts</div>
+      </div>
+      <button class="action-btn btn-approve" onclick="approveChore('${c.id}')">Confirm</button>
+      <button class="action-btn btn-deny" onclick="denyChore('${c.id}')">Deny</button>
+    </div>
+  `).join('');
+
+  const pendingRedemptionsHtml = pendingRedemptions.map(r=>`
+    <div class="chore-card">
+      <div class="chore-icon">${r.icon}</div>
+      <div class="chore-body">
+        <div class="chore-name">${escapeHtml(r.name)}</div>
+        <div class="chore-points">${r.cost} pts</div>
+      </div>
+      <button class="action-btn btn-approve" onclick="approveRedemption('${r.id}')">Give reward</button>
+      <button class="action-btn btn-deny" onclick="denyRedemption('${r.id}')">Deny</button>
+    </div>
+  `).join('');
+
+  const manageChoresHtml = state.chores.map(c=>`
+    <div class="manage-item">
+      <span class="mi-icon">${c.icon}</span>
+      <span class="mi-name">${escapeHtml(c.name)}</span>
+      <span class="mi-meta">${c.points} pts</span>
+      <button class="mi-del" onclick="deleteChore('${c.id}')" title="Remove">✕</button>
+    </div>
+  `).join('');
+
+  const manageRewardsHtml = state.rewards.map(r=>`
+    <div class="manage-item">
+      <span class="mi-icon">${r.icon}</span>
+      <span class="mi-name">${escapeHtml(r.name)}</span>
+      <span class="mi-meta">${r.cost} pts</span>
+      <button class="mi-del" onclick="deleteReward('${r.id}')" title="Remove">✕</button>
+    </div>
+  `).join('');
+
+  const recentLog = state.log.slice(-8).reverse().map(l=>`<div style="font-size:13px; padding:4px 0; border-bottom:1px solid #eee;">${escapeHtml(l.text)}</div>`).join('') || '<div class="empty-msg">Nothing yet.</div>';
+
+  wrap.innerHTML = `
+    <div class="panel">
+      <h2>✅ NEEDS YOUR CHECK ${(pendingChores.length+pendingRedemptions.length)>0 ? `<span class="tag-pending-count">${pendingChores.length+pendingRedemptions.length}</span>`:''}</h2>
+      <div class="chore-list">
+        ${pendingChoresHtml}${pendingRedemptionsHtml}
+        ${(pendingChores.length===0 && pendingRedemptions.length===0) ? '<div class="empty-msg">All caught up! Nothing waiting on you.</div>' : ''}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>🧱 MANAGE QUESTS</h2>
+      ${manageChoresHtml}
+      <div class="form-row" style="margin-top:10px;">
+        <input type="text" id="newChoreName" placeholder="Chore name (e.g. Walk the dog)">
+        <input type="number" id="newChorePoints" placeholder="Pts" min="1" value="5">
+        <input type="text" id="newChoreIcon" placeholder="Emoji" maxlength="4" value="⭐" style="max-width:70px;">
+      </div>
+      <button class="action-btn btn-gold" onclick="addChore()">+ Add Chore</button>
+    </div>
+
+    <div class="panel">
+      <h2>🏆 MANAGE REWARDS</h2>
+      ${manageRewardsHtml}
+      <div class="form-row" style="margin-top:10px;">
+        <input type="text" id="newRewardName" placeholder="Reward name">
+        <input type="number" id="newRewardCost" placeholder="Cost" min="1" value="20">
+        <input type="text" id="newRewardIcon" placeholder="Emoji" maxlength="4" value="🎁" style="max-width:70px;">
+      </div>
+      <button class="action-btn btn-gold" onclick="addReward()">+ Add Reward</button>
+    </div>
+
+    <div class="panel">
+      <h2>📜 RECENT ACTIVITY</h2>
+      ${recentLog}
+    </div>
+
+    <div class="panel">
+      <h2>⚙️ SETTINGS</h2>
+      <div class="settings-row">
+        <span>Change caregiver PIN</span>
+        <input type="text" id="newPin" placeholder="New 4-digit PIN" maxlength="8" style="max-width:160px;">
+        <button class="action-btn btn-secondary" onclick="changePin()">Save PIN</button>
+      </div>
+      <div class="settings-row">
+        <span>Adjust points manually</span>
+        <input type="number" id="adjustPoints" placeholder="e.g. -10 or 10" style="max-width:120px;">
+        <button class="action-btn btn-secondary" onclick="adjustPoints()">Apply</button>
+      </div>
+      <button class="subtle-btn" onclick="lockCaregiver()">🔒 Lock caregiver mode</button>
+    </div>
+  `;
+  return wrap;
+}
+
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+/* ---------------- ACTIONS ---------------- */
+async function markDone(choreId){
+  state.status[choreId] = 'pending';
+  await persist();
+  showToast('SENT FOR CHECKING!');
+  render();
+}
+
+async function undoPending(choreId){
+  state.status[choreId] = 'none';
+  await persist();
+  render();
+}
+
+async function approveChore(choreId){
+  const c = state.chores.find(x=>x.id===choreId);
+  if(!c) return;
+  state.status[choreId] = 'done';
+  state.points += c.points;
+  state.log.push({text:`Confirmed "${c.name}" (+${c.points} pts)`, ts:Date.now()});
+  await persist();
+  showToast(`+${c.points} POINTS!`);
+  render();
+}
+
+async function denyChore(choreId){
+  state.status[choreId] = 'none';
+  await persist();
+  render();
+}
+
+async function requestRedeem(rewardId){
+  const r = state.rewards.find(x=>x.id===rewardId);
+  if(!r || state.points < r.cost) return;
+  state.redemptions.push({id:uid('rd_'), rewardId:r.id, name:r.name, icon:r.icon, cost:r.cost, status:'pending', ts:Date.now()});
+  await persist();
+  showToast('REQUEST SENT!');
+  render();
+}
+
+async function approveRedemption(redId){
+  const r = state.redemptions.find(x=>x.id===redId);
+  if(!r) return;
+  if(state.points < r.cost){
+    showToast("NOT ENOUGH POINTS ANYMORE");
+    r.status = 'denied';
+  } else {
+    state.points -= r.cost;
+    r.status = 'approved';
+    state.log.push({text:`Gave reward "${r.name}" (-${r.cost} pts)`, ts:Date.now()});
+  }
+  await persist();
+  render();
+}
+
+async function denyRedemption(redId){
+  const r = state.redemptions.find(x=>x.id===redId);
+  if(!r) return;
+  r.status = 'denied';
+  await persist();
+  render();
+}
+
+async function addChore(){
+  const name = document.getElementById('newChoreName').value.trim();
+  const pts = parseInt(document.getElementById('newChorePoints').value, 10) || 5;
+  const icon = document.getElementById('newChoreIcon').value.trim() || '⭐';
+  if(!name){ showToast('ENTER A CHORE NAME'); return; }
+  state.chores.push({id:uid('c_'), name, icon, points:pts});
+  await persist();
+  render();
+}
+
+async function deleteChore(id){
+  state.chores = state.chores.filter(c=>c.id!==id);
+  delete state.status[id];
+  await persist();
+  render();
+}
+
+async function addReward(){
+  const name = document.getElementById('newRewardName').value.trim();
+  const cost = parseInt(document.getElementById('newRewardCost').value, 10) || 20;
+  const icon = document.getElementById('newRewardIcon').value.trim() || '🎁';
+  if(!name){ showToast('ENTER A REWARD NAME'); return; }
+  state.rewards.push({id:uid('r_'), name, icon, cost});
+  await persist();
+  render();
+}
+
+async function deleteReward(id){
+  state.rewards = state.rewards.filter(r=>r.id!==id);
+  await persist();
+  render();
+}
+
+async function changePin(){
+  const v = document.getElementById('newPin').value.trim();
+  if(!/^\d{4,8}$/.test(v)){ showToast('PIN MUST BE 4-8 DIGITS'); return; }
+  state.pin = v;
+  await persist();
+  showToast('PIN UPDATED');
+  render();
+}
+
+async function adjustPoints(){
+  const v = parseInt(document.getElementById('adjustPoints').value, 10);
+  if(isNaN(v)) return;
+  state.points = Math.max(0, state.points + v);
+  state.log.push({text:`Manual adjustment (${v>0?'+':''}${v} pts)`, ts:Date.now()});
+  await persist();
+  render();
+}
+
+function lockCaregiver(){
+  careAuthed = false;
+  render();
+}
+
+loadState();
+</script>
+</body>
+</html>
